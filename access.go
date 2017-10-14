@@ -99,6 +99,55 @@ func Grant(key, password string, cfg *Config) (*APIAccess, error) {
 	return apiAccess, nil
 }
 
+// Login attempts
+// to update the grant but will fail if unauthorized
+func Login(key, password string, cfg *Config) (*APIAccess, error) {
+	if key == "" {
+		return nil, fmt.Errorf("%s", "key must not be empty")
+	}
+
+	if password == "" {
+		return nil, fmt.Errorf("%s", "password must not be empty")
+	}
+
+	u, err := user.New(key, password)
+	if err != nil {
+		return nil, err
+	}
+
+	apiAccess := &APIAccess{
+		Key:  u.Email,
+		Hash: u.Hash,
+		Salt: u.Salt,
+	}
+
+	err = apiAccess.setToken(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	err = db.Store().Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(apiAccessStore))
+		if b == nil {
+			return fmt.Errorf("failed to get bucket %s", apiAccessStore)
+		}
+
+		if b.Get([]byte(apiAccess.Key)) != nil {
+			err := updateGrant(key, password, cfg)
+			if err != nil {
+				return fmt.Errorf("failed to update APIAccess grant for %s, %v", apiAccess.Key, err)
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return apiAccess, nil
+}
+
 // IsGranted checks if the user request is authenticated by the token held within
 // the provided tokenStore (should be a http.Cookie or http.Header)
 func IsGranted(req *http.Request, tokenStore reqHeaderOrHTTPCookie) bool {
