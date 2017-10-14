@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -391,7 +392,11 @@ func GateKeeper(next http.HandlerFunc) http.HandlerFunc {
 		} else {
 			res.WriteHeader(http.StatusUnauthorized)
 			res.Write([]byte("Please login first..."))
-			fmt.Printf("Request: \n%v\n", req)
+			fmt.Println("Request:")
+			s := reflect.ValueOf(req).Elem()
+			for i := 0; i < s.NumField(); i++ {
+				fmt.Printf("%s: %s\n", s.Type().Field(i).Name, fmt.Sprint(s.Field(i).Interface()))
+			}
 		}
 	})
 }
