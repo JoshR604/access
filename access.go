@@ -153,8 +153,10 @@ func Login(key, password string, cfg *Config) (*APIAccess, error) {
 			if err != nil {
 				return fmt.Errorf("failed to update APIAccess grant for %s, %v", apiAccess.Key, err)
 			}
+			return nil
 		}
-		return nil
+
+		return fmt.Errorf("%s", "User Not Authorized")
 	})
 
 	if err != nil {
@@ -387,7 +389,7 @@ func (a *APIAccess) setToken(cfg *Config) error {
 // GateKeeper is the auth HandlerFunc, because we cannot use item.Hideable for our data without blocking references from other items
 func GateKeeper(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
-		if IsGranted(req, req.Header) || user.IsValid(req) || req.RemoteAddr == db.ConfigCache("bind_addr").(string) {
+		if IsGranted(req, req.Header) || user.IsValid(req) || trimPortFromAddress(req.RemoteAddr) == db.ConfigCache("bind_addr").(string) {
 			next.ServeHTTP(res, req)
 		} else {
 			res.WriteHeader(http.StatusUnauthorized)
@@ -399,4 +401,11 @@ func GateKeeper(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 	})
+}
+
+func trimPortFromAddress(s string) string {
+	if idx := strings.Index(s, ":"); idx != -1 {
+		return s[:idx]
+	}
+	return s
 }
