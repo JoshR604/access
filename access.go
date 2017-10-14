@@ -391,7 +391,7 @@ func GateKeeper(next http.HandlerFunc) http.HandlerFunc {
 		} else {
 			res.WriteHeader(http.StatusUnauthorized)
 			res.Write([]byte("Please login first..."))
-			fmt.Errorf("%v", req)
+			fmt.Printf("Request: \n%v\n", req)
 		}
 	})
 }
