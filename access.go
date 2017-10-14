@@ -387,7 +387,7 @@ func (a *APIAccess) setToken(cfg *Config) error {
 // GateKeeper is the auth HandlerFunc, because we cannot use item.Hideable for our data without blocking references from other items
 func GateKeeper(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
-		if IsGranted(req, req.Header) || user.IsValid(req) {
+		if IsGranted(req, req.Header) || user.IsValid(req) || req.RemoteAddr == db.ConfigCache("bind_addr").(string) {
 			next.ServeHTTP(res, req)
 		} else {
 			res.WriteHeader(http.StatusUnauthorized)
