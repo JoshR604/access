@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	apiAccessStore  = "__apiAccess"
-	apiAccessCookie = "_apiAccessToken"
+	apiAccessStore      = "__apiAccess"
+	apiPendingUserStore = "__apiPending"
+	apiAccessCookie     = "_apiAccessToken"
 )
 
 // APIAccess is the data for an API access grant
@@ -41,6 +42,7 @@ type reqHeaderOrHTTPCookie interface{}
 
 func init() {
 	db.AddBucket(apiAccessStore)
+	db.AddBucket(apiPendingUserStore)
 }
 
 // Grant creates a new APIAccess and saves it to the __apiAccess bucket in the database
@@ -90,6 +92,19 @@ func Grant(key, password string, cfg *Config) (*APIAccess, error) {
 		}
 
 		return b.Put([]byte(apiAccess.Key), j)
+	})
+
+	err = db.Store().Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(apiPendingUserStore))
+		if b == nil {
+			return fmt.Errorf("failed to get bucket %s", apiPendingUserStore)
+		}
+
+		if b.Get([]byte(apiAccess.Key)) != nil {
+			b.Delete([]byte(apiAccess.Key))
+		}
+
+		return nil
 	})
 
 	if err != nil {
@@ -148,6 +163,97 @@ func Login(key, password string, cfg *Config) (*APIAccess, error) {
 	return apiAccess, nil
 }
 
+// Check is to see if the user exists in either active or pending status
+func Check(key string) error {
+	if key == "" {
+		return fmt.Errorf("%s", "key must not be empty")
+	}
+
+	err := db.Store().View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(apiAccessStore))
+		if b == nil {
+			return fmt.Errorf("failed to get bucket %s", apiAccessStore)
+		}
+
+		if b.Get([]byte(key)) != nil {
+			return fmt.Errorf("%s", "email already actively in use")
+		}
+
+		return nil
+	})
+
+	err = db.Store().View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(apiPendingUserStore))
+		if b == nil {
+			return fmt.Errorf("failed to get bucket %s", apiPendingUserStore)
+		}
+
+		if b.Get([]byte(key)) != nil {
+			return fmt.Errorf("%s", "email already pending in use")
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Pending adds user to pending status to block possible duplicates
+func Pending(key string) error {
+	if key == "" {
+		return fmt.Errorf("%s", "key must not be empty")
+	}
+
+	err := db.Store().Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(apiPendingUserStore))
+		if b == nil {
+			return fmt.Errorf("failed to get bucket %s", apiPendingUserStore)
+		}
+
+		if b.Get([]byte(key)) != nil {
+			return fmt.Errorf("%s", "email already pending in use")
+		}
+
+		return b.Put([]byte(key), []byte("pending"))
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ClearPending adds user to pending status to block possible duplicates
+func ClearPending(key string) error {
+	if key == "" {
+		return fmt.Errorf("%s", "key must not be empty")
+	}
+
+	err := db.Store().Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(apiPendingUserStore))
+		if b == nil {
+			return fmt.Errorf("failed to get bucket %s", apiPendingUserStore)
+		}
+
+		if b.Get([]byte(key)) != nil {
+			b.Delete([]byte(key))
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // IsGranted checks if the user request is authenticated by the token held within
 // the provided tokenStore (should be a http.Cookie or http.Header)
 func IsGranted(req *http.Request, tokenStore reqHeaderOrHTTPCookie) bool {
@@ -182,7 +288,7 @@ func IsOwner(req *http.Request, tokenStore reqHeaderOrHTTPCookie, key string) bo
 }
 
 func updateGrant(key, password string, cfg *Config) error {
-	var apiAccess *APIAccess
+	apiAccess := new(APIAccess)
 	err := db.Store().View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(apiAccessStore))
 		if b == nil {
@@ -190,7 +296,8 @@ func updateGrant(key, password string, cfg *Config) error {
 		}
 
 		j := b.Get([]byte(key))
-		return json.Unmarshal(j, apiAccess)
+		fmt.Println("Raw DB Response:\n" + string(j) + "\nEnd Raw Response\n")
+		return json.Unmarshal(j, &apiAccess)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to get access grant to update grant, %v", err)
@@ -274,4 +381,16 @@ func (a *APIAccess) setToken(cfg *Config) error {
 	}
 
 	return nil
+}
+
+// GateKeeper is the auth HandlerFunc, because we cannot use item.Hideable for our data without blocking references from other items
+func GateKeeper(next http.HandlerFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		if IsGranted(req, req.Header) || user.IsValid(req) {
+			next.ServeHTTP(res, req)
+		} else {
+			res.WriteHeader(http.StatusUnauthorized)
+			res.Write([]byte("Please login first..."))
+		}
+	})
 }
