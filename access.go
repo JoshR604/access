@@ -231,7 +231,7 @@ func Pending(key string) error {
 	return nil
 }
 
-// ClearPending adds user to pending status to block possible duplicates
+// ClearPending removes the user from pending status db
 func ClearPending(key string) error {
 	if key == "" {
 		return fmt.Errorf("%s", "key must not be empty")
@@ -241,6 +241,32 @@ func ClearPending(key string) error {
 		b := tx.Bucket([]byte(apiPendingUserStore))
 		if b == nil {
 			return fmt.Errorf("failed to get bucket %s", apiPendingUserStore)
+		}
+
+		if b.Get([]byte(key)) != nil {
+			b.Delete([]byte(key))
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ClearGrant removes the user from active status db
+func ClearGrant(key string) error {
+	if key == "" {
+		return fmt.Errorf("%s", "key must not be empty")
+	}
+
+	err := db.Store().Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(apiAccessStore))
+		if b == nil {
+			return fmt.Errorf("failed to get bucket %s", apiAccessStore)
 		}
 
 		if b.Get([]byte(key)) != nil {
